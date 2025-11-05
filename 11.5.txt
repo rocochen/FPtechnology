@@ -41,4 +41,4 @@ int maxValue (int a, int b) {
 int (*p_t)(int, int) = NULL;  //定义一个与maxValue兼容的指针
 p_t = maxValue;
 p_t(20, 45);  //通过指针调用
-————————————————
+————————————————---------
