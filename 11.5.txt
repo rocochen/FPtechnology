@@ -1,0 +1,33 @@
+crotex m3内核有哪些寄存器
+Cortex-M3处理器的寄存器包括R0~R15和一些特殊的寄存器
+
+寄存器组	寄存器名	描述
+核心寄存器	R0-R12	通用数据寄存器
+R13 (SP)	堆栈指针 (MSP/PSP)
+R14 (LR)	链接寄存器，存储返回地址
+R15 (PC)	程序计数器，指向下一条指令
+特殊功能寄存器	xPSR	程序状态寄存器 (APSR+IPSR+EPSR)
+PRIMASK	中断屏蔽寄存器
+FAULTMASK	故障屏蔽寄存器
+BASEPRI	基础优先级屏蔽寄存器
+CONTROL	控制堆栈和特权级别
+
+cortex A内核的处理器差不多也是这些
+通用寄存器x0-x31
+专用SP/PC，LR寄存器改名了，有些寄存器改名了。
+
+
+
+enum枚举
+union联合体（内存字节占用计算
+
+
+函数指针（项目里用到的）和指针函数
+函数指针：
+typedef void (*CmdHandler_t)(Frame_t *frame);  // 定义函数指针类型
+
+typedef struct {
+    uint8_t cmd;
+    uint8_t sub_cmd;
+    CmdHandler_t handler;   // 函数指针成员
+} CmdTable_t;
