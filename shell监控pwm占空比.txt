@@ -1,0 +1,158 @@
+#!/bin/bash
+# PWM占空比监控脚本
+
+PWM_CHIP="pwmchip0"           # PWM控制器
+PWM_CHANNEL="0"               # PWM通道
+SYSFS_BASE="/sys/class/pwm"   # sysfs基础路径
+MAX_DUTY_PERCENT=80           # 最大允许占空比（%）
+MIN_DUTY_PERCENT=10           # 最小允许占空比（%）
+CHECK_INTERVAL=2              # 检查间隔（秒）
+LOG_FILE="/var/log/pwm_monitor.log"
+DRIVER_NAME="pwm_driver"      # 要卸载的驱动名
+
+# 日志函数
+log() {
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $1" | tee -a "$LOG_FILE"
+}
+
+# 获取PWM参数
+get_pwm_period() {
+    local period_file="$SYSFS_BASE/$PWM_CHIP/pwm$PWM_CHANNEL/period"
+    if [ -f "$period_file" ]; then
+        cat "$period_file"
+    else
+        echo "0"
+    fi
+}
+
+get_pwm_duty_cycle() {
+    local duty_file="$SYSFS_BASE/$PWM_CHIP/pwm$PWM_CHANNEL/duty_cycle"
+    if [ -f "$duty_file" ]; then
+        cat "$duty_file"
+    else
+        echo "0"
+    fi
+}
+
+# 计算占空比百分比
+calculate_duty_percent() {
+    local duty_cycle=$1
+    local period=$2
+    
+    if [ "$period" -eq 0 ]; then
+        echo "0"
+        return
+    fi
+    
+    # 计算百分比 (duty_cycle / period * 100)
+    local percent=$(( (duty_cycle * 100) / period ))
+    echo "$percent"
+}
+
+# 检查PWM状态
+check_pwm_status() {
+    # 检查PWM是否已导出
+    local pwm_path="$SYSFS_BASE/$PWM_CHIP/pwm$PWM_CHANNEL"
+    if [ ! -d "$pwm_path" ]; then
+        log "错误: PWM通道未导出: $pwm_path"
+        return 1
+    fi
+    
+    # 检查PWM是否使能
+    local enable_file="$pwm_path/enable"
+    if [ ! -f "$enable_file" ]; then
+        log "错误: 使能文件不存在: $enable_file"
+        return 1
+    fi
+    
+    local enabled=$(cat "$enable_file")
+    if [ "$enabled" -ne 1 ]; then
+        log "警告: PWM未使能"
+        return 1
+    fi
+    
+    return 0
+}
+
+# 安全卸载驱动
+safe_unload_driver() {
+    log "尝试卸载驱动: $DRIVER_NAME"
+    
+    # 先禁用PWM
+    local enable_file="$SYSFS_BASE/$PWM_CHIP/pwm$PWM_CHANNEL/enable"
+    if [ -f "$enable_file" ]; then
+        echo "0" > "$enable_file" 2>/dev/null && log "PWM已禁用"
+    fi
+    
+    # 卸载驱动
+    if rmmod "$DRIVER_NAME" 2>/dev/null; then
+        log "驱动卸载成功"
+        return 0
+    else
+        log "正常卸载失败，尝试强制卸载"
+        if rmmod -f "$DRIVER_NAME" 2>/dev/null; then
+            log "驱动强制卸载成功"
+            return 0
+        else
+            log "错误: 无法卸载驱动"
+            return 1
+        fi
+    fi
+}
+
+# 主监控循环
+main() {
+    log "PWM占空比监控启动"
+    log "监控目标: $SYSFS_BASE/$PWM_CHIP/pwm$PWM_CHANNEL"
+    log "限制范围: ${MIN_DUTY_PERCENT}% - ${MAX_DUTY_PERCENT}%"
+    
+    local consecutive_errors=0
+    local max_consecutive_errors=3
+    
+    while true; do
+        # 检查PWM状态
+        if ! check_pwm_status; then
+            consecutive_errors=$((consecutive_errors + 1))
+            log "PWM状态检查失败 (连续: $consecutive_errors)"
+            
+            if [ $consecutive_errors -ge $max_consecutive_errors ]; then
+                log "PWM持续异常，卸载驱动"
+                safe_unload_driver
+                break
+            fi
+            sleep $CHECK_INTERVAL
+            continue
+        fi
+        
+        consecutive_errors=0
+        
+        # 获取PWM参数
+        local period=$(get_pwm_period)
+        local duty_cycle=$(get_pwm_duty_cycle)
+        local duty_percent=$(calculate_duty_percent "$duty_cycle" "$period")
+        
+        # 记录当前状态（可选，避免日志过多）
+        if [ $(( $(date +%s) % 30 )) -eq 0 ]; then  # 每30秒记录一次
+            log "PWM状态: 周期=${period}ns, 占空比=${duty_cycle}ns (${duty_percent}%)"
+        fi
+        
+        # 检查占空比限制
+        if [ "$duty_percent" -gt "$MAX_DUTY_PERCENT" ] || [ "$duty_percent" -lt "$MIN_DUTY_PERCENT" ]; then
+            log "警报: 占空比超出范围! 当前: ${duty_percent}%, 允许: ${MIN_DUTY_PERCENT}%-${MAX_DUTY_PERCENT}%"
+            log "系统状态: 周期=$period, 占空比=$duty_cycle"
+            
+            # 执行紧急操作
+            safe_unload_driver
+            break
+        fi
+        
+        sleep $CHECK_INTERVAL
+    done
+    
+    log "PWM监控停止"
+}
+
+# 信号处理
+trap 'log "监控脚本被中断"; safe_unload_driver; exit 0' INT TERM
+
+main
