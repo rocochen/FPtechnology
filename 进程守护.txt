@@ -1,0 +1,24 @@
+#！/bin/bash
+
+APPname="app"
+APPpath="/usr/bin/$APPname"
+
+
+while(1)
+do
+	if ps | grep "$APPname";then
+		echo "app exist!!"
+	else
+		echo "restart again"
+		APPpath &
+	fi
+	sleep 5
+done
+
+
+
+
+
+
+
+
